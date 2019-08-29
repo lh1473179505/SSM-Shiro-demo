@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:aop="http://www.springframework.org/schema/aop"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:tx="http://www.springframework.org/schema/tx"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd
+		http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop.xsd
+		http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx.xsd ">
+		<!-- 包扫描 -->
+		<context:component-scan base-package="cn.sjxy">
+			<context:exclude-filter type="annotation" expression="org.springframework.stereotype.Controller"/>
+		</context:component-scan>
+		<!-- 导入jdbc配置文件 -->
+		<context:property-placeholder location="classpath:jdbc.properties"/>
+		<!-- 配置数据库连接池 -->
+		<bean id="datasource" class="com.mchange.v2.c3p0.ComboPooledDataSource">
+			<property name="driverClass" value="${jdbc.driverClass}"/>
+		<property name="jdbcUrl" value="${jdbc.dburl}"/>
+		<property name="user" value="${jdbc.username}"/>
+		<property name="password" value="${jdbc.password}"/>
+		</bean>
+		<!-- 配置mybatis整合 -->
+		<bean id="sqlSessionFactory" class="org.mybatis.spring.SqlSessionFactoryBean">
+			<property name="configLocation" value="classpath:mybatis-config.xml"/>
+			<property name="dataSource" ref="datasource"/>
+			<property name="mapperLocations" value="classpath:mapper/*.xml"/>
+		</bean>
+		<!--配置批量插入  -->
+		<bean id="sqlSession" class="org.mybatis.spring.SqlSessionTemplate">
+			<constructor-arg name="sqlSessionFactory" ref="sqlSessionFactory" ></constructor-arg>
+			<constructor-arg name="executorType" value="BATCH"></constructor-arg>
+		</bean>	
+		<!-- 进行xml配置文件扫描配置 -->	
+		<bean class="org.mybatis.spring.mapper.MapperScannerConfigurer">
+			<property name="basePackage" value="cn.sjxy.dao"/>
+			<property name="sqlSessionFactoryBeanName" value="sqlSessionFactory"/>
+			<property name="sqlSessionTemplateBeanName" value="sqlSession"></property>
+		</bean>
+		
+		<!-- 配置事务管理 -->
+		<bean id="tx" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+			<property name="dataSource" ref="datasource"/>
+		</bean>
+		<!-- 使事务管理的注解生效 -->
+		<tx:annotation-driven  transaction-manager="tx"/>
+		
+		
+		
+		<!-- 配置shiro -->
+		  <bean id="securityManager" class="org.apache.shiro.web.mgt.DefaultWebSecurityManager">
+        <property name="cacheManager" ref="cacheManager"/>
+        <!-- 配置cookie失效时间，单位是秒 -->
+        <property name="rememberMeManager.cookie.maxAge" value="10"></property>
+        
+        <property name="authenticator" ref="authenticator"></property>
+        <!-- 配置多realm -->
+        		<property name="realms">
+			<list>
+				<ref bean="jdbcRealm"/>
+				<ref bean="secondRealm"/>
+			</list>
+		</property>
+    </bean>
+<!-- 配置缓存机制 -->
+    <bean id="cacheManager" class="org.apache.shiro.cache.ehcache.EhCacheManager">
+        <property name="cacheManagerConfigFile" value="classpath:ehcache.xml"/>
+    </bean>
+	
+	<!--配置认证策略  -->
+	<bean id="authenticator" class="org.apache.shiro.authc.pam.ModularRealmAuthenticator">
+		<!-- 
+		realm三种认证策略：
+			FirstSuccessfulStrategy：有一个认证成功就行，只返回第一个realm身份验证成功信息
+			AtLeastOneSuccessfulStrategy：有一个认证成功即可，返回所有realm验证成功的信息（默认）
+			AllSuccessfulStrategy：必须所有realm验证都成功否则失败，返回所有验证成功的realm信息
+			
+			<property name="authenticationStrategy">
+			<bean class="org.apache.shiro.authc.pam.FirstSuccessfulStrategy"/>
+		</property>
+		 -->
+		
+	</bean>
+	<!--配置第一个realm，realm具体内容由java类实现  -->
+    <bean id="jdbcRealm" class="cn.sjxy.realms.ShiroRrealm">
+    	<property name="credentialsMatcher">
+    		<bean class="org.apache.shiro.authc.credential.HashedCredentialsMatcher">
+    			<property name="hashAlgorithmName" value="MD5"></property>
+    			<property name="hashIterations" value="1024"></property>
+    		</bean>
+    	</property>
+    </bean> 
+    <!-- 配置第二个realm -->
+     <bean id="secondRealm" class="cn.sjxy.realms.SecondRrealm">
+    	<property name="credentialsMatcher">
+    		<bean class="org.apache.shiro.authc.credential.HashedCredentialsMatcher">
+    			<property name="hashAlgorithmName" value="SHA1"></property>
+    			<property name="hashIterations" value="1024"></property>
+    		</bean>
+    	</property>
+    </bean> 
+    	
+<!-- 配置shiro的bean生命周期 -->
+    <bean id="lifecycleBeanPostProcessor" class="org.apache.shiro.spring.LifecycleBeanPostProcessor"/>
+
+    <bean class="org.springframework.aop.framework.autoproxy.DefaultAdvisorAutoProxyCreator"
+          depends-on="lifecycleBeanPostProcessor">
+          <!-- 解决代理器混乱问题（用@AutoWired注入出现问题） -->
+          <property name="proxyTargetClass" value="true"/>  
+    </bean>
+          
+    <bean class="org.apache.shiro.spring.security.interceptor.AuthorizationAttributeSourceAdvisor">
+        <property name="securityManager" ref="securityManager"/>
+    </bean>
+<!-- 最为重要的是这个拦截器。 -->
+<!-- 
+	loginUrl：登录页面，设置好以后，程序启动进入的第一个页面就是他
+	successUrl：登录成功后跳转的页面
+	unauthorizedUrl：点击没有访问权限的页面时跳转的页面
+	
+ -->
+    <bean id="shiroFilter" class="org.apache.shiro.spring.web.ShiroFilterFactoryBean">
+        <property name="securityManager" ref="securityManager"/>
+        <property name="loginUrl" value="/login.jsp"/>
+        <property name="successUrl" value="/list.jsp"/>
+        <property name="unauthorizedUrl" value="/unauthorized.jsp"/>
+        <property name="filterChainDefinitionMap" ref="filterChainMap"></property>
+        
+        <!--  
+        <property name="filterChainDefinitions">-->
+        <!-- 细节方面：注意等号前后的空格
+        		anon：不用验证可以访问
+        		logout：注销
+        		roles[角色名]：需要某角色才能方法，java代码中通过Set集合的add方法添加角色
+        		authc：需要验证成功后才能访问
+         -->
+           <!--   <value>
+            	/admin/insert = anon
+                /login.jsp = anon
+                /admin/login = anon
+                /register.jsp = anon
+                /logout = logout
+                
+                /user.jsp = roles[user]
+                /admin.jsp = roles[admin]
+                # everything else requires authentication:
+                /** = authc
+            </value>
+        </property>-->
+    </bean>
+    
+    <!-- 配置一个bean，该bean是个Map，通过实例工厂方法的方式 -->
+    <!-- 封装个id= filterChainMap，工厂类名filterChain，工厂方法buildFilter -->
+    <bean id="filterChainMap"  factory-bean="filterChain" factory-method="buildFilter"></bean>
+    <!-- 将工厂类注册进来 -->
+    <bean id="filterChain" class="cn.sjxy.factory.FilterChain"></bean>
+    
+   <!-- 解决代理器冲突问题 --> 
+<aop:aspectj-autoproxy  proxy-target-class="true"/> 
+</beans>
